@@ -9,6 +9,7 @@ class WorkflowState:
   messages: List[Any] = None
   current_state: str = ""
   data: Dict[str, Any] = None
+  iterationCounter: int = 0
 
 
 class BaseAgent(ABC):
@@ -104,6 +105,35 @@ class RespondAgent(BaseAgent):
     print(f"Final Response: {formatted_response}")
     state.current_state = "Completed"
     return state
+  
+class ValidationAgent(BaseAgent):
+  def __init__(self, name):
+    super().__init__(name)
+    self.role = "ValidationAgent"
+  
+  def process(self, state: WorkflowState) -> WorkflowState:
+    result = state.data.get("result", "No result available")
+    if not result or "no result available" in result.lower():
+      error_message = "Validation Error: No valid result found."
+      self.add_message(state, error_message)
+      state.current_state = "orchestration"
+      print(f"Validation Error: {error_message}")
+    else:
+      success_message = "Validation successful, proceeding to respond."
+      self.add_message(state, success_message)
+      print(f"Validation Success: {success_message}")
+      state.current_state = "respond"
+      
+    state.iterationCounter += 1
+    if state.iterationCounter > 5:
+      error_message = "Validation Error: Too many iterations, stopping workflow."
+      self.add_message(state, error_message)
+      state.current_state = "respond"
+      state.data["result"] = "Workflow stopped due to too many iterations."
+      print(f"Validation Error: {error_message}")
+    return state
+    
+
 
 class WorkflowManager:
   def __init__(self):
@@ -112,6 +142,7 @@ class WorkflowManager:
     self.billing = BillingAgent("BillingAgent")
     self.technical = TechnicalAgent("TechnicalAgent")
     self.respond = RespondAgent("RespondAgent")
+    self.validation = ValidationAgent("ValidationAgent")
     self.workflow = self._build_workflow()
   
   def _build_workflow(self):
@@ -122,6 +153,7 @@ class WorkflowManager:
     workflow.add_node("general", self._general_node)
     workflow.add_node("technical", self._technical_node)
     workflow.add_node("respond", self._respond_node)
+    workflow.add_node("validation", self._validation_node)
     
     workflow.add_edge(START, "orchestration")
     
@@ -129,9 +161,15 @@ class WorkflowManager:
       "orchestration",
       lambda state: state.current_state.lower()
     )
-    workflow.add_edge("billing", "respond")
-    workflow.add_edge("general", "respond")
-    workflow.add_edge("technical", "respond")
+    workflow.add_edge("billing", "validation")
+    workflow.add_edge("general", "validation")
+    workflow.add_edge("technical", "validation")
+    workflow.add_edge("validation", "respond")
+    
+    workflow.add_conditional_edges(
+      "validation",
+      lambda state: state.current_state.lower()
+    )
     
     workflow.add_edge("respond", END)
     return workflow.compile()
@@ -151,6 +189,9 @@ class WorkflowManager:
   def _respond_node(self, state:WorkflowState)->WorkflowState:
     return self.respond.process(state)
   
+  def _validation_node(self, state:WorkflowState)->WorkflowState:
+    return self.validation.process(state)
+  
   def run(self, query: str) -> WorkflowState:
     print("Multi-agent System started processing this query", query)
     
@@ -158,11 +199,10 @@ class WorkflowManager:
       user_message=query,
       messages=[],
       current_state="Start(Orchestration)",
-      data={}
+      data={},
+      iterationCounter=0
     )
-    
     result = self.workflow.invoke(initial_state)
-    
     return result
        
 if __name__ == "__main__":
