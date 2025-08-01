@@ -1,0 +1,6 @@
+langchain
+langchain-community
+langgraph
+langchain-core
+pydantic
+duckduckgo-search
